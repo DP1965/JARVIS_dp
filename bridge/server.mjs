@@ -1025,6 +1025,11 @@ console.log(
 )
 console.log(`[jarvis] model ${MODEL} · effort ${EFFORT}`)
 console.log(
+  process.platform === 'win32'
+    ? '[jarvis] PC tools ready — open sites and apps, volume, screenshots, files, notes'
+    : '[jarvis] PC tools are Windows-only',
+)
+console.log(
   `[jarvis] writes ${ALLOW_WRITES ? 'ENABLED' : 'disabled'}` +
     (ALLOW_WRITES ? '' : ' — set JARVIS_ALLOW_WRITES=1 to permit shell/file/device actions'),
 )
