@@ -20,6 +20,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk'
 import { displayServer } from './panels.mjs'
 import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
+import { windowsServer } from './windows.mjs'
 import { visionServer } from './vision.mjs'
 import { homedir, tmpdir } from 'node:os'
 import { readFileSync, realpathSync } from 'node:fs'
@@ -279,6 +280,11 @@ function decideTool(name) {
     // indicator the user can see for as long as it is live.
     if (server === 'jarvis_eyes') return true
 
+    // The Windows PC tools. Curated and validated one by one in windows.mjs —
+    // no shell, no delete, no overwrite, no arbitrary program — so they are safe
+    // without ALLOW_WRITES, and `pc_open_url` would otherwise read as a write.
+    if (server === 'jarvis_pc') return true
+
     const tool = mcpToolOf(name)
     if (EFFECTFUL_VERB.test(tool) && !VETO_EXEMPT.has(`${server}__${tool}`)) {
       return ALLOW_WRITES
@@ -382,6 +388,19 @@ The interface itself:
   subject moves on.
 - Put it back. A colour that outlives the moment that earned it is a fault.
 - Never mention that you have done any of it. They are looking at the screen.
+
+Their Windows PC — the \`pc_*\` tools, for everyday jobs:
+- \`pc_open_url\` and \`pc_web_search\` open a page in their default browser;
+  \`pc_open_app\` launches an app by name; \`pc_open_folder\`, \`pc_find_files\`
+  and \`pc_open_file\` find and open things; \`pc_media\` handles volume and
+  play/pause/next; \`pc_screenshot\`, \`pc_clipboard\`, \`pc_note\`,
+  \`pc_system_info\`, \`pc_show_desktop\` and \`pc_lock\` do what they say.
+- "Open ChatGPT", "turn the volume down", "take a screenshot", "open my
+  downloads", "what's my battery" — just do it with these, then say in one short
+  sentence what you did. If \`chrome_status\` says the browser is unreachable
+  (it always is on Windows), use \`pc_open_url\` instead of apologising.
+- Common sites: ChatGPT is https://chatgpt.com, Gmail https://mail.google.com,
+  YouTube https://youtube.com, WhatsApp Web https://web.whatsapp.com.
 
 Their browser — ALWAYS the \`chrome_*\` tools, first, for anything to do with a
 browser or a web page:
@@ -1214,6 +1233,8 @@ wss.on('connection', (socket) => {
         jarvis_chrome: chromeServer({ allowWrites: ALLOW_WRITES }),
         // The camera, which unlike everything else here has to ask and wait.
         jarvis_eyes: visionServer(ask),
+        // The Windows PC: open sites and apps, volume, screenshots, files, notes.
+        ...(process.platform === 'win32' ? { jarvis_pc: windowsServer() } : {}),
       },
       // A plain system prompt, not the claude_code preset. The preset is
       // tuned for a coding agent — verbose, file-oriented, and a large chunk

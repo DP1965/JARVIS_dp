@@ -313,3 +313,17 @@ MIT.
 The boot sound and any tracks in `public/audio/` ship with the project for the
 demo. If you go on to monetise something built on this, clearing the rights to
 that audio is your responsibility.
+
+---
+
+## Windows PC control (JARVIS_dp addition)
+
+On Windows the Chrome extension bridge cannot connect (it uses a Unix socket), so
+`bridge/windows.mjs` adds a `jarvis_pc` tool server for everyday jobs, with no
+`JARVIS_ALLOW_WRITES` needed: open sites and apps, web search, volume and media
+keys, screenshots (saved to Pictures\JARVIS), find and open files, clipboard,
+notes (Documents\JARVIS Notes), system info, show desktop, lock.
+
+It is not a shell: apps come from a fixed list (extend it with
+`$env:JARVIS_APPS="name=C:\path\app.exe;other=ms-settings:"`), programs and
+scripts are refused by the file opener, and nothing is deleted or overwritten.
