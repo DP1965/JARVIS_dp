@@ -283,7 +283,8 @@ function decideTool(name) {
     // The Windows PC tools. Curated and validated one by one in windows.mjs —
     // no shell, no delete, no overwrite, no arbitrary program — so they are safe
     // without ALLOW_WRITES, and `pc_open_url` would otherwise read as a write.
-    if (server === 'jarvis_pc') return true
+    // Except sending mail, which leaves the machine and cannot be taken back.
+    if (server === 'jarvis_pc') return mcpToolOf(name) === 'pc_send_email' ? ALLOW_WRITES : true
 
     const tool = mcpToolOf(name)
     if (EFFECTFUL_VERB.test(tool) && !VETO_EXEMPT.has(`${server}__${tool}`)) {
@@ -399,6 +400,10 @@ Their Windows PC — the \`pc_*\` tools, for everyday jobs:
   downloads", "what's my battery" — just do it with these, then say in one short
   sentence what you did. If \`chrome_status\` says the browser is unreachable
   (it always is on Windows), use \`pc_open_url\` instead of apologising.
+- \`pc_send_email\` sends mail through their signed-in Gmail. NEVER call it until
+  you have read the recipient, subject and body back and they have said yes; then
+  pass confirm: true. Report "sent" only if the tool says Gmail confirmed it — if
+  it says NOT SENT, tell them so plainly.
 - Common sites: ChatGPT is https://chatgpt.com, Gmail https://mail.google.com,
   YouTube https://youtube.com, WhatsApp Web https://web.whatsapp.com.
 

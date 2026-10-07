@@ -5,6 +5,7 @@ import { promisify } from 'node:util'
 import { homedir } from 'node:os'
 import { join, extname, resolve, sep } from 'node:path'
 import { mkdir, readdir, writeFile, access } from 'node:fs/promises'
+import { gmailSend } from './chrome.mjs'
 
 const run = promisify(execFile)
 
@@ -313,6 +314,52 @@ if ($bat) { "Battery: $($bat.EstimatedChargeRemaining)%" } else { "Battery: none
       async () => {
         await ps('(New-Object -ComObject Shell.Application).MinimizeAll()')
         return text('Desktop shown.')
+      },
+    ),
+
+    tool(
+      'pc_send_email',
+      'Send an email through the Gmail web session already signed in to the ' +
+        "user's own Chrome (no SMTP, no passwords). Only call this after you " +
+        'have read the recipient, subject and body back to the user and they ' +
+        'have clearly said yes; then pass confirm: true. It returns "sent" only ' +
+        'when Gmail itself confirmed it. If Chrome cannot be driven (always the ' +
+        'case on Windows) it opens the prefilled draft in the default browser ' +
+        'for the user to press Send, and says plainly that nothing was sent.',
+      {
+        to: z.string().describe('Recipient address, or several separated by commas (max 10).'),
+        subject: z.string().max(200),
+        body: z.string().max(1500).describe('Plain-text body, up to 1500 characters.'),
+        confirm: z
+          .boolean()
+          .describe('Must be true, and only after the user approved this exact message.'),
+      },
+      async ({ to, subject, body, confirm }) => {
+        if (confirm !== true) {
+          return fail(
+            `Not sent. Read this back and ask for a yes first — To: ${to} | Subject: ${subject} | ${body}`,
+          )
+        }
+        const addrs = to.split(',').map((a) => a.trim()).filter(Boolean)
+        const EMAIL = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/
+        if (!addrs.length || addrs.length > 10 || !addrs.every((a) => EMAIL.test(a))) {
+          return fail('Not sent: the recipient address is not valid.')
+        }
+        if (/[\r\n]/.test(subject)) return fail('Not sent: the subject cannot contain line breaks.')
+
+        const r = await gmailSend({ to: addrs.join(','), subject, body })
+        if (r.sent) return text(`Sent to ${addrs.join(', ')}. Gmail confirmed it.`)
+        if (r.reachable === false) {
+          const draft =
+            'https://mail.google.com/mail/?view=cm&fs=1' +
+            `&to=${encodeURIComponent(addrs.join(','))}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+          await shellOpen(draft)
+          return text(
+            'NOT SENT. I cannot drive Chrome on this PC, so I opened the draft in your ' +
+              'browser with everything filled in. Press Send there yourself.',
+          )
+        }
+        return fail(`NOT confirmed sent. ${r.detail}`)
       },
     ),
 

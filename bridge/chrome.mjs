@@ -438,6 +438,85 @@ async function settle(tab, target) {
   }
 }
 
+const fail = (text) => ({ isError: true, content: [{ type: 'text', text }] })
+
+/** Every tabId the extension reports, in the order it reports them. */
+async function listTabs() {
+  const reply = await link.call('tabs_context_mcp', { createIfEmpty: false })
+  const ids = []
+  for (const block of reply?.result?.content ?? []) {
+    if (block?.type !== 'text' || typeof block.text !== 'string') continue
+    try {
+      for (const t of JSON.parse(block.text)?.availableTabs ?? []) {
+        if (typeof t?.tabId === 'number') ids.push(t.tabId)
+      }
+      if (ids.length) break
+    } catch {
+      // prose copy of the same list; the JSON block is the one we want
+    }
+  }
+  return ids
+}
+
+const textOf = (reply) =>
+  (reply?.result?.content ?? []).map((b) => (typeof b?.text === 'string' ? b.text : '')).join('\n')
+
+/**
+ * Send one email through the Gmail web session in the user's own Chrome. No SMTP
+ * and no credentials: the browser is already signed in.
+ *
+ * Opens Gmail's own compose URL with the three fields prefilled — the same
+ * compose window a click on Compose produces, without depending on where that
+ * button sits — then finds Send on the page, clicks it, and reads the page back.
+ * "sent: true" is only returned when Gmail itself said so.
+ *
+ * Returns { reachable: false } when there is no browser to drive, so the caller
+ * can fall back instead of guessing.
+ */
+export async function gmailSend({ to, subject, body }) {
+  if (!(await findSocket())) return { reachable: false }
+  try {
+    const url =
+      'https://mail.google.com/mail/?view=cm&fs=1' +
+      `&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+
+    const made = await link.call('tabs_create_mcp', {})
+    const tab = Number(/"?tabId"?[:\s]+(\d{3,})/.exec(textOf(made))?.[1])
+    if (!Number.isFinite(tab)) return { reachable: true, sent: false, detail: 'Could not open a new tab.' }
+
+    const nav = await link.call('navigate', { url, tabId: tab })
+    if (nav?.error) return { reachable: true, sent: false, detail: 'Could not open Gmail.' }
+    await settle(tab, 'https://mail.google.com/mail/')
+    await new Promise((r) => setTimeout(r, 1500))
+
+    const page = textOf(await link.call('read_page', { tabId: tab, filter: 'interactive' }))
+    if (/sign in|choose an account/i.test(page) && !/compose|send/i.test(page)) {
+      return { reachable: true, sent: false, detail: 'Gmail is not signed in in this Chrome.' }
+    }
+    const line = page
+      .split('\n')
+      .find((l) => /send/i.test(l) && /\[ref_\d+\]/.test(l) && !/schedule|options|more/i.test(l))
+    const ref = /\[(ref_\d+)\]/.exec(line ?? '')?.[1]
+    if (!ref) return { reachable: true, sent: false, detail: 'Could not find the Send button; the draft is open in Chrome.' }
+
+    const click = await link.call('computer', { action: 'left_click', ref, tabId: tab })
+    if (click?.error) return { reachable: true, sent: false, detail: 'Clicking Send failed; the draft is open in Chrome.' }
+
+    for (let i = 0; i < 8; i++) {
+      await new Promise((r) => setTimeout(r, 700))
+      const after = textOf(await link.call('get_page_text', { tabId: tab, max_chars: 3000 }))
+      if (/message sent|your message has been sent/i.test(after)) return { reachable: true, sent: true }
+    }
+    return {
+      reachable: true,
+      sent: false,
+      detail: 'I clicked Send but Gmail never confirmed it. Check the Sent folder before trying again.',
+    }
+  } catch (err) {
+    return { reachable: true, sent: false, detail: `Browser error: ${err?.message ?? err}` }
+  }
+}
+
 /** The tab to act on: the one named, the one we remember, or a fresh one. */
 async function resolveTab(given) {
   if (given !== undefined && given !== null && `${given}`.trim() !== '') {
@@ -783,16 +862,58 @@ export function chromeServer({ allowWrites }) {
 
       tool(
         'chrome_close_tab',
-        'Close a tab by id.',
+        'Close browser tabs. Give a numeric tabId to close that tab; omit it to ' +
+          'close the active tab (the one JARVIS is working in). Pass "others" to ' +
+          'close every tab except the active one, or "all" to close every tab. ' +
+          'Returns the tabs that remain.',
         {
           tabId: z
             .union([z.number(), z.string()])
-            .describe('The numeric tabId to close, from chrome_tabs.'),
+            .optional()
+            .catch(undefined)
+            .describe(
+              'A numeric tabId from chrome_tabs, or "others" (close all but the ' +
+                'active tab), or "all" (close every tab). Omit to close the active tab.',
+            ),
         },
         async (args) => {
-          const out = await forward('tabs_close_mcp', { needsTab: false })(args)
-          if (Number(args.tabId) === activeTab) activeTab = null
-          return out
+          try {
+            const raw = args.tabId
+            const word = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
+            const tabs = await listTabs()
+            const active = activeTab ?? tabs[0] ?? null
+            let targets
+            if (word === 'others') targets = tabs.filter((id) => id !== active)
+            else if (word === 'all') targets = tabs
+            else if (raw === undefined || raw === null || word === '') {
+              if (active === null) return fail('There is no active tab to close.')
+              targets = [active]
+            } else {
+              const id = Number(raw)
+              if (!Number.isFinite(id)) return fail('tabId must be a number, "others" or "all".')
+              targets = [id]
+            }
+
+            let closed = 0
+            const failures = []
+            for (const id of targets) {
+              const reply = await link.call('tabs_close_mcp', { tabId: id })
+              if (reply?.error) failures.push(id)
+              else closed += 1
+              if (id === activeTab) activeTab = null
+            }
+            if (word === 'all') activeTab = null
+
+            const remaining = await link.call('tabs_context_mcp', { createIfEmpty: false })
+            const out = toResult(remaining)
+            const note =
+              `Closed ${closed} tab${closed === 1 ? '' : 's'}` +
+              (failures.length ? `; could not close ${failures.join(', ')}` : '') +
+              '. Remaining tabs:'
+            return { ...out, content: [{ type: 'text', text: note }, ...out.content] }
+          } catch (err) {
+            return fail(`Could not reach the browser: ${err?.message ?? err}.`)
+          }
         },
       ),
     )
