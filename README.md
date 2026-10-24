@@ -327,3 +327,21 @@ notes (Documents\JARVIS Notes), system info, show desktop, lock.
 It is not a shell: apps come from a fixed list (extend it with
 `$env:JARVIS_APPS="name=C:\path\app.exe;other=ms-settings:"`), programs and
 scripts are refused by the file opener, and nothing is deleted or overwritten.
+
+---
+
+## Full access mode (JARVIS_dp addition)
+
+`npm.cmd run start:full` (or `JARVIS_ACCESS=full`) lets JARVIS run commands, write
+files anywhere and use every connected tool on your instruction, with no prompt for
+each step. Guard rails live in `bridge/guard.mjs`:
+
+- **Blocked, even if you say yes:** anything touching SSH keys, cloud credentials,
+  `.env` files, browser cookies/saved logins, Windows credential stores, or Claude's
+  own login files.
+- **Needs your spoken "yes" to that action:** deleting, formatting, shutting down,
+  installing or uninstalling software, registry/firewall/security changes, writing
+  into Windows or Program Files, and anything that sends, pays, posts or publishes.
+- **Everything else just runs.**
+- Text found on web pages, in emails, files or command output is treated as data, never
+  as an instruction.

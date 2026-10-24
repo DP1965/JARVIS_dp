@@ -105,7 +105,12 @@ process.on('SIGTERM', () => shutdown(0))
  * without widening what the bridge trusts by default.
  */
 const port = process.env.PORT
-const bridgeEnv = writes ? { JARVIS_ALLOW_WRITES: '1' } : {}
+const full = process.argv.includes('--full')
+const bridgeEnv = full
+  ? { JARVIS_ACCESS: 'full', JARVIS_ALLOW_WRITES: '1' }
+  : writes
+    ? { JARVIS_ALLOW_WRITES: '1' }
+    : {}
 if (port) {
   bridgeEnv.JARVIS_ALLOWED_ORIGINS = `http://localhost:${port},http://127.0.0.1:${port}`
   console.log(`  serving the face on port ${port}; the bridge will accept it.\n`)
