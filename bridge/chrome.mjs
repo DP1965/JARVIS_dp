@@ -82,6 +82,17 @@ const CONNECT_TIMEOUT_MS = 3_000
  * accepted as a last resort, because on some setups it is all there is.
  */
 async function findSocket() {
+  // Windows has no /tmp sockets: the extension's native host listens on a named
+  // pipe instead, and net.createConnection takes the pipe path just like a socket
+  // path. Listing \\.\pipe\ is the cheap way to ask whether it is there.
+  if (process.platform === 'win32') {
+    const pipe = `claude-mcp-browser-bridge-${userInfo().username}`
+    try {
+      return (await readdir('\\\\.\\pipe\\')).includes(pipe) ? `\\\\.\\pipe\\${pipe}` : null
+    } catch {
+      return null
+    }
+  }
   let names
   try {
     names = await readdir(SOCKET_DIR)
